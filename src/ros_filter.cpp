@@ -36,6 +36,9 @@
 #include <robot_localization/ros_filter_utilities.hpp>
 #include <robot_localization/ukf.hpp>
 
+#define PL_IMPLEMENTATION 1
+#include <robot_localization/palanteer.hpp>
+
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <rcl/time.h>
 #include <rclcpp/qos.hpp>
@@ -84,6 +87,9 @@ RosFilter<T>::RosFilter(const rclcpp::NodeOptions & options)
   tf_timeout_(0ns),
   tf_time_offset_(0ns)
 {
+  plInitAndStart("Ros Filter");
+  plDeclareThread("Main thread");
+
   tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
   tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
 
@@ -119,11 +125,14 @@ RosFilter<T>::~RosFilter()
   freq_diag_.reset();
   accel_pub_.reset();
   position_pub_.reset();
+
+  plStopAndUninit();
 }
 
 template<typename T>
 void RosFilter<T>::reset()
 {
+  plFunction();
   // Get rid of any initial poses (pretend we've never had a measurement)
   initial_measurements_.clear();
   previous_measurements_.clear();
@@ -159,6 +168,7 @@ void RosFilter<T>::toggleFilterProcessingCallback(
   const std::shared_ptr<
     robot_localization::srv::ToggleFilterProcessing::Response> resp)
 {
+  plFunction();
   if (req->on == toggled_on_) {
     RCLCPP_WARN(
       this->get_logger(),
@@ -181,6 +191,7 @@ void RosFilter<T>::accelerationCallback(
   const CallbackData & callback_data,
   const std::string & target_frame)
 {
+  plFunction();
   // If we've just reset the filter, then we want to ignore any messages
   // that arrive with an older timestamp
   if (last_set_pose_time_ >= msg->header.stamp) {
@@ -276,6 +287,7 @@ template<typename T>
 void RosFilter<T>::controlCallback(
   const geometry_msgs::msg::Twist::SharedPtr msg)
 {
+  plFunction();
   geometry_msgs::msg::TwistStamped::SharedPtr twist_stamped_ptr =
     std::make_shared<geometry_msgs::msg::TwistStamped>();
   twist_stamped_ptr->twist = *msg;
@@ -288,6 +300,7 @@ template<typename T>
 void RosFilter<T>::controlStampedCallback(
   const geometry_msgs::msg::TwistStamped::SharedPtr msg)
 {
+  plFunction();
   if (msg->header.frame_id == base_link_frame_id_ ||
     msg->header.frame_id == "")
   {
@@ -319,6 +332,7 @@ void RosFilter<T>::enqueueMeasurement(
   const std::vector<bool> & update_vector, const double mahalanobis_thresh,
   const rclcpp::Time & time)
 {
+  plFunction();
   MeasurementPtr meas = MeasurementPtr(new Measurement());
 
   meas->topic_name_ = topic_name;
@@ -338,6 +352,8 @@ void RosFilter<T>::forceTwoD(
   Eigen::MatrixXd & measurement_covariance,
   std::vector<bool> & update_vector)
 {
+  plFunction();
+
   measurement(StateMemberZ) = 0.0;
   measurement(StateMemberRoll) = 0.0;
   measurement(StateMemberPitch) = 0.0;
@@ -366,6 +382,7 @@ void RosFilter<T>::forceTwoD(
 template<typename T>
 bool RosFilter<T>::getFilteredOdometryMessage(nav_msgs::msg::Odometry * message)
 {
+  plFunction();
   // If the filter has received a measurement at some point...
   if (filter_.getInitializedStatus()) {
     // Grab our current state and covariance estimates
@@ -427,6 +444,7 @@ template<typename T>
 bool RosFilter<T>::getFilteredAccelMessage(
   geometry_msgs::msg::AccelWithCovarianceStamped * message)
 {
+  plFunction();
   // If the filter has received a measurement at some point...
   if (filter_.getInitializedStatus()) {
     // Grab our current state and covariance estimates
@@ -465,6 +483,8 @@ void RosFilter<T>::imuCallback(
   const CallbackData & twist_callback_data,
   const CallbackData & accel_callback_data)
 {
+  plFunction();
+
   RF_DEBUG(
     "------ RosFilter<T>::imuCallback (" <<
       topic_name << ") ------\n")         // << "IMU message:\n" << *msg);
@@ -575,6 +595,7 @@ void RosFilter<T>::imuCallback(
 template<typename T>
 void RosFilter<T>::integrateMeasurements(const rclcpp::Time & current_time)
 {
+  plFunction();
   RF_DEBUG(
     "------ RosFilter<T>::integrateMeasurements ------\n\n"
     "Integration time is " <<
@@ -714,6 +735,7 @@ void RosFilter<T>::integrateMeasurements(const rclcpp::Time & current_time)
 template<typename T>
 void RosFilter<T>::loadParams()
 {
+  plFunction();
   /* For diagnostic purposes, collect information about how many different
    * sources are measuring each absolute pose variable and do not have
    * differential integration enabled.
@@ -1786,6 +1808,7 @@ void RosFilter<T>::odometryCallback(
   const CallbackData & pose_callback_data,
   const CallbackData & twist_callback_data)
 {
+  plFunction();
   // If we've just reset the filter, then we want to ignore any messages
   // that arrive with an older timestamp
   if (last_set_pose_time_ >= msg->header.stamp) {
@@ -1843,6 +1866,7 @@ void RosFilter<T>::poseCallback(
   const CallbackData & callback_data, const std::string & target_frame,
   const bool imu_data)
 {
+  plFunction();
   const std::string & topic_name = callback_data.topic_name_;
 
   // If we've just reset the filter, then we want to ignore any messages
@@ -1991,11 +2015,17 @@ void RosFilter<T>::initialize()
     this->get_clock(), std::chrono::duration_cast<std::chrono::nanoseconds>(timespan),
     std::bind(&RosFilter<T>::periodicUpdate, this), this->get_node_base_interface()->get_context());
   this->get_node_timers_interface()->add_timer(timer_, nullptr);
+
+  timer_ = create_wall_timer(
+    20ms, std::bind(&RosFilter<T>::periodicUpdate, this));
 }
 
 template<typename T>
 void RosFilter<T>::periodicUpdate()
 {
+  plFunction();
+  plLogInfo("update", "Start of uptate");
+
   // Wait for the filter to be enabled
   if (!enabled_) {
     RCLCPP_INFO_ONCE(
@@ -2135,6 +2165,7 @@ void RosFilter<T>::periodicUpdate()
 
     // Fire off the position and the transform
     if (!corrected_data) {
+      plLogInfo("update", "Publishing position");
       position_pub_->publish(std::move(filtered_position));
     }
 
@@ -2178,6 +2209,8 @@ void RosFilter<T>::periodicUpdate()
       loop_elapsed << "seconds. Try decreasing the rate, limiting "
       "sensor output frequency, or limiting the number of sensors.\n";
   }
+
+  plLogInfo("category", "End of update");
 }
 
 template<typename T>
@@ -2275,6 +2308,8 @@ void RosFilter<T>::twistCallback(
   const geometry_msgs::msg::TwistWithCovarianceStamped::SharedPtr msg,
   const CallbackData & callback_data, const std::string & target_frame)
 {
+  plFunction();
+
   const std::string & topic_name = callback_data.topic_name_;
 
   // If we've just reset the filter, then we want to ignore any messages
@@ -2382,6 +2417,8 @@ template<typename T>
 void RosFilter<T>::aggregateDiagnostics(
   diagnostic_updater::DiagnosticStatusWrapper & wrapper)
 {
+  plFunction();
+
   wrapper.clear();
   wrapper.clearSummary();
 
@@ -2445,6 +2482,8 @@ void RosFilter<T>::copyCovariance(
   const std::vector<bool> & update_vector,
   const size_t offset, const size_t dimension)
 {
+  plFunction();
+
   for (size_t i = 0; i < dimension; i++) {
     for (size_t j = 0; j < dimension; j++) {
       covariance(i, j) = arr[dimension * i + j];
@@ -2526,6 +2565,8 @@ bool RosFilter<T>::prepareAcceleration(
   Eigen::VectorXd & measurement,
   Eigen::MatrixXd & measurement_covariance)
 {
+  plFunction();
+
   RF_DEBUG(
     "------ RosFilter<T>::prepareAcceleration (" << topic_name <<
       ") ------\n");
@@ -2706,6 +2747,8 @@ bool RosFilter<T>::preparePose(
   std::vector<bool> & update_vector, Eigen::VectorXd & measurement,
   Eigen::MatrixXd & measurement_covariance)
 {
+  plFunction();
+
   bool retVal = false;
 
   RF_DEBUG("------ RosFilter<T>::preparePose (" << topic_name << ") ------\n");
@@ -3130,6 +3173,8 @@ bool RosFilter<T>::prepareTwist(
   std::vector<bool> & update_vector, Eigen::VectorXd & measurement,
   Eigen::MatrixXd & measurement_covariance)
 {
+  plFunction();
+
   RF_DEBUG("------ RosFilter<T>::prepareTwist (" << topic_name << ") ------\n");
 
   // 1. Get the measurement into two separate vector objects.

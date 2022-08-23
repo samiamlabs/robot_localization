@@ -76,6 +76,7 @@ add_library(
 
 rosidl_get_typesupport_target(cpp_typesupport_target "${PROJECT_NAME}" "rosidl_typesupport_cpp")
 target_link_libraries(${library_name} "${cpp_typesupport_target}")
+target_compile_options(${library_name} PRIVATE -DUSE_PL=1)
 
 add_executable(
   ekf_node

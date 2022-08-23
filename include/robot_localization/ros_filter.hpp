@@ -777,6 +777,7 @@ protected:
   //! @brief Timer for filter updates
   //!
   rclcpp::TimerBase::SharedPtr timer_;
+  rclcpp::TimerBase::SharedPtr test_timer_;
 
   //! @brief optional signaling diagnostic frequency
   //!
